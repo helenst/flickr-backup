@@ -7,13 +7,17 @@ import flickrapi
 import pyexiv2
 import requests
 
-
+# setup here https://www.flickr.com/services/apps/create/
 API_KEY = os.getenv('FLICKR_API_KEY')
 API_SECRET = os.getenv('FLICKR_API_SECRET')
+
+# this can be the ID, or username
 USER_ID = os.getenv('FLICKR_USER_ID')
 
+# max 500
 PHOTOS_PER_PAGE = 500
 
+# We don't use all these, but we store them in the metadata.
 EXTRA_FIELDS = (
     'description, license, date_upload, date_taken, owner_name, '
     'icon_server, original_format, last_update, geo, tags, machine_tags, '
@@ -21,6 +25,7 @@ EXTRA_FIELDS = (
     'url_n, url_z, url_c, url_l, url_o'
 )
 
+# create this
 DOWNLOAD_DIR = 'downloads/'
 
 
@@ -147,6 +152,13 @@ class FlickrMedia:
 # apply video metadata if possible (less important if we just store the json)
 
 if __name__ == '__main__':
+    try:
+        os.mkdir(DOWNLOAD_DIR)
+        print('created download dir: {}'.format(DOWNLOAD_DIR))
+    except FileExistsError:
+        # that's fine.
+        pass
+
     flickr = flickrapi.FlickrAPI(API_KEY, API_SECRET)
     metadata = []
 
