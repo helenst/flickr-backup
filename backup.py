@@ -14,6 +14,15 @@ USER_ID = os.getenv('FLICKR_USER_ID')
 
 PHOTOS_PER_PAGE = 10
 
+EXTRA_FIELDS = (
+    'description, license, date_upload, date_taken, owner_name, '
+    'icon_server, original_format, last_update, geo, tags, machine_tags, '
+    'o_dims, views, media, path_alias, url_sq, url_t, url_s, url_q, url_m, '
+    'url_n, url_z, url_c, url_l, url_o'
+)
+
+DOWNLOAD_DIR = 'downloads/'
+
 
 def decdeg2dms(dd):
     """convert decimal degrees to (d, m, s)"""
@@ -27,18 +36,6 @@ def abs_geo_coord(decimal_degrees):
         Fraction(int(field), 1)
         for field in decdeg2dms(abs(decimal_degrees))
     ]
-
-
-def download_file(url, filename):
-    path = os.path.join('downloads', filename)
-    print("Downloading {} to {}".format(url, path))
-    r = requests.get(url, stream=True)
-    if r.status_code == 200:
-        with open(path, 'wb') as f:
-            for chunk in r:
-                f.write(chunk)
-
-    return path
 
 
 class Photo:
@@ -70,56 +67,69 @@ class Photo:
         return self._data['id']
 
     @property
-    def original_url(self):
+    def photo_url(self):
         return self._data['url_o']
 
     @property
-    def is_video(self):
-        return self._data['media'] == 'video'
+    def is_photo(self):
+        return self._data['media'] == 'photo'
 
-    def process_video(self):
+    @property
+    def file_path(self):
+        ext = 'jpg' if self.is_photo else 'mp4'
+        filename = '{}.{}'.format(self.photo_id, ext)
+        return os.path.join(DOWNLOAD_DIR, filename)
+
+    @property
+    def video_url(self):
         photo_info = flickr.photos.getSizes(
             photo_id=self.photo_id, format='parsed-json'
         )
         sizes = photo_info['sizes']['size']
         hd = [sz['source'] for sz in sizes if sz['label'] == 'HD MP4']
         if hd:
-            hd_url = hd[0]
-            requests.get(hd[0])
-            print('HD video URL: {}'.format(hd[0]))
-            filename = '{}.mp4'.format(self.photo_id)
-            download_file(hd_url, filename)
+            return hd[0]
         else:
             print('hd not found')
 
-    def process_photo(self):
-        print('Original size URL: {}'.format(self.original_url))
-        filename = '{}.jpg'.format(self.photo_id)
+    def write_metadata(self):
+        """
+        Write metadata to the file (Must be downloaded first)
+        """
+        if self.is_photo:
+            metadata = pyexiv2.ImageMetadata(self.file_path)
+            metadata.read()
+            metadata['Iptc.Application2.Keywords'] = self.tags
+            metadata['Xmp.dc.title'] = self.title
+            metadata['Xmp.dc.description'] = self.description
+            metadata['Exif.Image.ImageDescription'] = self.description
+            if self.latitude or self.longitude:
+                metadata['Exif.GPSInfo.GPSLatitude'] = abs_geo_coord(self.latitude)
+                metadata['Exif.GPSInfo.GPSLatitudeRef'] = 'N' if self.latitude > 0 else 'S'
+                metadata['Exif.GPSInfo.GPSLongitude'] = abs_geo_coord(self.longitude)
+                metadata['Exif.GPSInfo.GPSLongitudeRef'] = 'E' if self.longitude > 0 else 'W'
+            metadata.write()
 
-        path = download_file(self.original_url, filename)
+    def download_file(self):
+        """
+        Download the file to local storage
+        """
+        url = self.photo_url if self.is_photo else self.video_url
+        to_path = self.file_path
 
-        metadata = pyexiv2.ImageMetadata(path)
-        metadata.read()
-        metadata['Iptc.Application2.Keywords'] = self.tags
-        metadata['Xmp.dc.title'] = self.title
-        metadata['Xmp.dc.description'] = self.description
-        metadata['Exif.Image.ImageDescription'] = self.description
-        if self.latitude or self.longitude:
-            metadata['Exif.GPSInfo.GPSLatitude'] = abs_geo_coord(self.latitude)
-            metadata['Exif.GPSInfo.GPSLatitudeRef'] = 'N' if self.latitude > 0 else 'S'
-            metadata['Exif.GPSInfo.GPSLongitude'] = abs_geo_coord(self.longitude)
-            metadata['Exif.GPSInfo.GPSLongitudeRef'] = 'E' if self.longitude > 0 else 'W'
-        metadata.write()
+        print("Downloading {} to {}".format(url, to_path))
+        r = requests.get(url, stream=True)
+        if r.status_code == 200:
+            with open(to_path, 'wb') as f:
+                for chunk in r:
+                    f.write(chunk)
 
     def process(self):
-        if self.is_video:
-            self.process_video()
-        else:
-            self.process_photo()
+        self.download_file()
+        self.write_metadata()
 
 
 # TODO:
-# save the (combined) json as a metadata record, with as much info as possible
 # fetch sets, comments, other stuff.
 # apply video metadata if possible (less important if we just store the json)
 
@@ -134,14 +144,14 @@ for page in count(1):
         per_page=PHOTOS_PER_PAGE,
         page=page,
         format='parsed-json',
-        extras='description,date_taken,tags,url_o,geo,media',
+        extras=EXTRA_FIELDS,
     )
 
     photos = data['photos']['photo']
     for photo in photos:
         Photo(photo).process()
 
-    metadata.append(photos)
+    metadata.extend(photos)
 
     if data['photos']['page'] == data['photos']['pages']:
         break
