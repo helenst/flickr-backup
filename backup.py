@@ -12,7 +12,7 @@ API_KEY = os.getenv('FLICKR_API_KEY')
 API_SECRET = os.getenv('FLICKR_API_SECRET')
 USER_ID = os.getenv('FLICKR_USER_ID')
 
-PHOTOS_PER_PAGE = 10
+PHOTOS_PER_PAGE = 500
 
 EXTRA_FIELDS = (
     'description, license, date_upload, date_taken, owner_name, '
@@ -38,7 +38,7 @@ def abs_geo_coord(decimal_degrees):
     ]
 
 
-class Photo:
+class FlickrMedia:
     def __init__(self, data):
         self._data = data
 
@@ -67,12 +67,12 @@ class Photo:
         return self._data['id']
 
     @property
-    def photo_url(self):
-        return self._data['url_o']
-
-    @property
     def is_photo(self):
         return self._data['media'] == 'photo'
+
+    @property
+    def is_video(self):
+        return self._data['media'] == 'video'
 
     @property
     def file_path(self):
@@ -81,7 +81,20 @@ class Photo:
         return os.path.join(DOWNLOAD_DIR, filename)
 
     @property
+    def photo_url(self):
+        assert self.is_photo
+
+        return self._data['url_o']
+
+    @property
     def video_url(self):
+        """
+        Get the video url for this media item
+
+        It's not in the metadata so has to be requested.
+        """
+        assert self.is_video
+
         photo_info = flickr.photos.getSizes(
             photo_id=self.photo_id, format='parsed-json'
         )
@@ -133,32 +146,29 @@ class Photo:
 # fetch sets, comments, other stuff.
 # apply video metadata if possible (less important if we just store the json)
 
+if __name__ == '__main__':
+    flickr = flickrapi.FlickrAPI(API_KEY, API_SECRET)
+    metadata = []
 
-flickr = flickrapi.FlickrAPI(API_KEY, API_SECRET)
-metadata = []
+    for page in count(1):
+        print('fetching page {}'.format(page))
+        data = flickr.people.getPhotos(
+            user_id=USER_ID,
+            per_page=PHOTOS_PER_PAGE,
+            page=page,
+            format='parsed-json',
+            extras=EXTRA_FIELDS,
+        )
 
-for page in count(1):
-    print('fetching page {}'.format(page))
-    data = flickr.people.getPhotos(
-        user_id=USER_ID,
-        per_page=PHOTOS_PER_PAGE,
-        page=page,
-        format='parsed-json',
-        extras=EXTRA_FIELDS,
-    )
+        photos = data['photos']['photo']
+        for photo in photos:
+            FlickrMedia(photo).process()
 
-    photos = data['photos']['photo']
-    for photo in photos:
-        Photo(photo).process()
+        metadata.extend(photos)
 
-    metadata.extend(photos)
+        if data['photos']['page'] == data['photos']['pages']:
+            break
 
-    if data['photos']['page'] == data['photos']['pages']:
-        break
-
-    if page == 2:
-        break
-
-print('Writing metadata')
-with open('downloads/metadata.json', 'w') as fp:
-    json.dump(metadata, fp)
+    print('Writing metadata')
+    with open('downloads/metadata.json', 'w') as fp:
+        json.dump(metadata, fp)
