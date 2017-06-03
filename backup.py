@@ -1,5 +1,7 @@
+import json
 import os
 from fractions import Fraction
+from itertools import count
 
 import flickrapi
 import pyexiv2
@@ -9,6 +11,8 @@ import requests
 API_KEY = os.getenv('FLICKR_API_KEY')
 API_SECRET = os.getenv('FLICKR_API_SECRET')
 USER_ID = os.getenv('FLICKR_USER_ID')
+
+PHOTOS_PER_PAGE = 10
 
 
 def decdeg2dms(dd):
@@ -37,76 +41,114 @@ def download_file(url, filename):
     return path
 
 
-def process_photos(photos):
-    for photo in photos:
-        print()
+class Photo:
+    def __init__(self, data):
+        self._data = data
 
-        title = photo['title']
-        print('Title: {}'.format(photo['title']))
+    @property
+    def title(self):
+        return self._data['title']
 
-        description = photo['description']['_content']
-        if description:
-            print('Description: {}'.format(description))
+    @property
+    def description(self):
+        return self._data['description']['_content']
 
-        tags = photo['tags'].split()
-        if tags:
-            print('Tags: {}'.format(tags))
+    @property
+    def tags(self):
+        return self._data['tags'].split()
 
-        lat = float(photo['latitude'])
-        lng = float(photo['longitude'])
-        if lat or lng:
-            print('Location: {}, {}'.format(lat, lng))
+    @property
+    def latitude(self):
+        return float(self._data['latitude'])
 
-        if photo['media'] == 'video':
-            photo_info = flickr.photos.getSizes(photo_id=photo['id'], format='parsed-json')
-            sizes = photo_info['sizes']['size']
-            hd = [sz['source'] for sz in sizes if sz['label'] == 'HD MP4']
-            if not hd:
-                print('hd not found')
-                break
-            else:
-                hd_url = hd[0]
-                requests.get(hd[0])
-                print('HD video URL: {}'.format(hd[0]))
-                filename = '{}.mp4'.format(photo['id'])
-                path = download_file(hd_url, filename)
+    @property
+    def longitude(self):
+        return float(self._data['longitude'])
 
+    @property
+    def photo_id(self):
+        return self._data['id']
+
+    @property
+    def original_url(self):
+        return self._data['url_o']
+
+    @property
+    def is_video(self):
+        return self._data['media'] == 'video'
+
+    def process_video(self):
+        photo_info = flickr.photos.getSizes(
+            photo_id=self.photo_id, format='parsed-json'
+        )
+        sizes = photo_info['sizes']['size']
+        hd = [sz['source'] for sz in sizes if sz['label'] == 'HD MP4']
+        if hd:
+            hd_url = hd[0]
+            requests.get(hd[0])
+            print('HD video URL: {}'.format(hd[0]))
+            filename = '{}.mp4'.format(self.photo_id)
+            download_file(hd_url, filename)
         else:
-            original_url = photo['url_o']
-            print('Original size URL: {}'.format(original_url))
-            filename = '{}.jpg'.format(photo['id'])
+            print('hd not found')
 
-            path = download_file(original_url, filename)
+    def process_photo(self):
+        print('Original size URL: {}'.format(self.original_url))
+        filename = '{}.jpg'.format(self.photo_id)
 
-            metadata = pyexiv2.ImageMetadata(path)
-            metadata.read()
-            metadata['Iptc.Application2.Keywords'] = tags
-            metadata['Xmp.dc.title'] = title
-            metadata['Xmp.dc.description'] = description
-            metadata['Exif.Image.ImageDescription'] = description
-            if lat or lng:
-                metadata['Exif.GPSInfo.GPSLatitude'] = abs_geo_coord(lat)
-                metadata['Exif.GPSInfo.GPSLatitudeRef'] = 'N' if lat > 0 else 'S'
-                metadata['Exif.GPSInfo.GPSLongitude'] = abs_geo_coord(lng)
-                metadata['Exif.GPSInfo.GPSLongitudeRef'] = 'E' if lng > 0 else 'W'
-            metadata.write()
+        path = download_file(self.original_url, filename)
+
+        metadata = pyexiv2.ImageMetadata(path)
+        metadata.read()
+        metadata['Iptc.Application2.Keywords'] = self.tags
+        metadata['Xmp.dc.title'] = self.title
+        metadata['Xmp.dc.description'] = self.description
+        metadata['Exif.Image.ImageDescription'] = self.description
+        if self.latitude or self.longitude:
+            metadata['Exif.GPSInfo.GPSLatitude'] = abs_geo_coord(self.latitude)
+            metadata['Exif.GPSInfo.GPSLatitudeRef'] = 'N' if self.latitude > 0 else 'S'
+            metadata['Exif.GPSInfo.GPSLongitude'] = abs_geo_coord(self.longitude)
+            metadata['Exif.GPSInfo.GPSLongitudeRef'] = 'E' if self.longitude > 0 else 'W'
+        metadata.write()
+
+    def process(self):
+        if self.is_video:
+            self.process_video()
+        else:
+            self.process_photo()
 
 
 # TODO:
 # save the (combined) json as a metadata record, with as much info as possible
-# process further pages
 # fetch sets, comments, other stuff.
 # apply video metadata if possible (less important if we just store the json)
 
 
 flickr = flickrapi.FlickrAPI(API_KEY, API_SECRET)
+metadata = []
 
-data = flickr.people.getPhotos(
-    user_id=USER_ID,
-    per_page=50,
-    format='parsed-json',
-    extras='description,date_taken,tags,url_o,geo,media',
-)
+for page in count(1):
+    print('fetching page {}'.format(page))
+    data = flickr.people.getPhotos(
+        user_id=USER_ID,
+        per_page=PHOTOS_PER_PAGE,
+        page=page,
+        format='parsed-json',
+        extras='description,date_taken,tags,url_o,geo,media',
+    )
 
-photos = data['photos']['photo']
-process_photos(photos)
+    photos = data['photos']['photo']
+    for photo in photos:
+        Photo(photo).process()
+
+    metadata.append(photos)
+
+    if data['photos']['page'] == data['photos']['pages']:
+        break
+
+    if page == 2:
+        break
+
+print('Writing metadata')
+with open('downloads/metadata.json', 'w') as fp:
+    json.dump(metadata, fp)
