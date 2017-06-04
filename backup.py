@@ -44,8 +44,9 @@ def abs_geo_coord(decimal_degrees):
 
 
 class FlickrMedia:
-    def __init__(self, data):
+    def __init__(self, data, download_dir):
         self._data = data
+        self._download_dir = download_dir
 
     @property
     def title(self):
@@ -83,7 +84,7 @@ class FlickrMedia:
     def file_path(self):
         ext = 'jpg' if self.is_photo else 'mp4'
         filename = '{}.{}'.format(self.photo_id, ext)
-        return os.path.join(DOWNLOAD_DIR, filename)
+        return os.path.join(self._download_dir, filename)
 
     @property
     def photo_url(self):
@@ -146,21 +147,20 @@ class FlickrMedia:
         self.download_file()
         self.write_metadata()
 
+def mkdir_p(path):
+    try:
+        os.mkdir(path)
+    except FileExistsError:
+        pass
 
 # TODO:
 # fetch sets, comments, other stuff.
 # apply video metadata if possible (less important if we just store the json)
 
 if __name__ == '__main__':
-    try:
-        os.mkdir(DOWNLOAD_DIR)
-        print('created download dir: {}'.format(DOWNLOAD_DIR))
-    except FileExistsError:
-        # that's fine.
-        pass
+    mkdir_p(DOWNLOAD_DIR)
 
     flickr = flickrapi.FlickrAPI(API_KEY, API_SECRET)
-    metadata = []
 
     for page in count(1):
         print('fetching page {}'.format(page))
@@ -172,15 +172,17 @@ if __name__ == '__main__':
             extras=EXTRA_FIELDS,
         )
 
-        photos = data['photos']['photo']
-        for photo in photos:
-            FlickrMedia(photo).process()
+        page_dir = os.path.join(DOWNLOAD_DIR, 'page{}'.format(page))
+        mkdir_p(page_dir)
 
-        metadata.extend(photos)
+        photos = data['photos']['photo']
+
+        print('Writing metadata index')
+        with open(os.path.join(page_dir, 'index.json'), 'w') as fp:
+            json.dump(photos, fp)
+
+        for photo in photos:
+            FlickrMedia(photo, page_dir).process()
 
         if data['photos']['page'] == data['photos']['pages']:
             break
-
-    print('Writing metadata')
-    with open('downloads/metadata.json', 'w') as fp:
-        json.dump(metadata, fp)
