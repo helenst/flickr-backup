@@ -136,7 +136,7 @@ class FlickrMedia:
         url = self.photo_url if self.is_photo else self.video_url
         to_path = self.file_path
 
-        if not os.path.isfile(to_path):
+        if url and not os.path.isfile(to_path):
             print("Downloading {} to {}".format(url, to_path))
             r = requests.get(url, stream=True)
             if r.status_code == 200:
