@@ -16,12 +16,17 @@ Requires python 3.
 
 ## Install
 
+For ubuntu (probably similar requirements on other systems):
+```bash
+$ sudo apt-get install libexiv2-dev libboost-python-dev
 ```
+
+```bash
 $ pip install -r requirements.txt
 ```
 
 ## Configure
-```
+```bash
 export FLICKR_API_KEY='<your-api-key>'
 export FLICKR_API_SECRET='<your-api-secret>'
 export FLICKR_USERNAME='<your-flickr-username>'
@@ -30,6 +35,6 @@ export FLICKR_USERNAME='<your-flickr-username>'
 
 ## Run
 
-```
+```bash
 $ python backup.py
 ```
