@@ -136,16 +136,18 @@ class FlickrMedia:
         url = self.photo_url if self.is_photo else self.video_url
         to_path = self.file_path
 
-        print("Downloading {} to {}".format(url, to_path))
-        r = requests.get(url, stream=True)
-        if r.status_code == 200:
-            with open(to_path, 'wb') as f:
-                for chunk in r:
-                    f.write(chunk)
+        if not os.path.isfile(to_path):
+            print("Downloading {} to {}".format(url, to_path))
+            r = requests.get(url, stream=True)
+            if r.status_code == 200:
+                with open(to_path, 'wb') as f:
+                    for chunk in r:
+                        f.write(chunk)
 
     def process(self):
         self.download_file()
         self.write_metadata()
+
 
 def mkdir_p(path):
     try:
